@@ -1,0 +1,16 @@
+{
+  "name": "ksb-go-deploy-automation",
+  "private": true,
+  "version": "17.2.0",
+  "description": "KSB GO V17.2 source and safe Google Apps Script deployment automation",
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "check": "npm test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@google/clasp": "3.4.1"
+  }
+}

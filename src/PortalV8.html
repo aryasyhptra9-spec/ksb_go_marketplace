@@ -1,0 +1,221 @@
+<script>
+/** V8 private-role portal UI. URL selection is only presentation; API enforces RBAC. */
+(function () {
+  'use strict';
+  const PORTAL_NAMES={buyer:'Pembeli',seller:'Seller',courier:'Kurir',admin:'Admin'};
+  const PORTAL_ICONS={buyer:'🛍',seller:'🏬',courier:'🛵',admin:'🛡'};
+  const ROLES={buyer:'BUYER',seller:'SELLER',courier:'COURIER',admin:'ADMIN'};
+  const current=Object.prototype.hasOwnProperty.call(ROLES,window.KSB_PORTAL)?window.KSB_PORTAL:'buyer';
+  const portalRole=ROLES[current];
+  const portalName=PORTAL_NAMES[current];
+  KSB.state.portal=current;
+  KSB.state.role=portalRole;
+  KSB.state.loginRole=portalRole;
+  const allowed=()=>!!KSB.state.user&&Array.isArray(KSB.state.user.roles)&&KSB.state.user.roles.includes(portalRole);
+
+  // Portal link always stays in its own role. Do not expose cross-role links from buyer.
+  KSB.switchRole=async function(role){
+    if(role!==portalRole){this.toast('Gunakan tautan portal khusus untuk peran tersebut.',true);return;}
+    if(!allowed()){await this.goto('account');return;}
+    this.state.role=portalRole;
+    await this.goto(current==='buyer'?'home':'dashboard');
+  };
+  KSB.actions.role=async el=>KSB.switchRole(el.dataset.role);
+  KSB.actions.authSelectRole=async()=>{KSB.toast('Silakan masuk melalui alamat portal sesuai peran.',true);};
+
+  // Never include ADMIN in publicly rendered login options. Admin uses ?portal=admin only.
+  KSB.publicRoleChooser=function(){
+    const base=String(window.KSB_APP_URL||'').replace(/\/$/,'');
+    const entry=(portal,label,icon,description)=>{
+      if(!base)return `<div class="ksb-v9-role-option" role="status"><span class="role-icon">${icon}</span><strong>${label}</strong><small>URL deploy belum tersedia</small></div>`;
+      return `<a class="ksb-v9-role-option" href="${KSB.h(base+'?portal='+portal)}" target="_top"><span class="role-icon">${icon}</span><strong>${label}</strong><small>${description}</small></a>`;
+    };
+    return `<section class="ksb-v9-role-chooser"><div class="ksb-v9-logo">K</div><h1>Masuk ke KSB GO</h1><p>Pilih jenis akun Anda untuk melanjutkan. Pendaftaran Seller dan Kurir memerlukan persetujuan pengelola.</p><div class="ksb-v9-role-grid"><button type="button" class="ksb-v9-role-option" data-action="authBuyerSelect"><span class="role-icon">🛍️</span><strong>Pembeli</strong><small>Belanja, keranjang & pesanan</small></button>${entry('seller','Seller','🏬','Daftarkan dan kelola toko')}${entry('courier','Kurir','🛵','Ambil order & antar barang')}</div><button type="button" class="ksb-v9-back" data-action="goHome">← Kembali ke beranda</button></section>`;
+  };
+  KSB.actions.authBuyerSelect=async()=>{KSB.state.publicBuyerLoginChosen=true;await KSB.goto('account');};
+  KSB.actions.authBackToRoles=async()=>{KSB.state.publicBuyerLoginChosen=false;KSB.state.otpChallenge='';KSB.state.otpExisting=false;await KSB.goto('account');};
+  KSB.actions.authUseExistingOtp=async()=>{
+    var emailInput=document.getElementById('auth_email');
+    if(emailInput)KSB.state.otpEmail=emailInput.value.trim();
+    KSB.state.otpExisting=true;
+    await KSB.goto('account');
+  };
+  KSB.actions.authResetOtp=async()=>{
+    KSB.state.otpChallenge='';KSB.state.otpExisting=false;
+    await KSB.goto('account');
+  };
+  const authIntro={buyer:'Masuk atau daftar akun untuk berbelanja, checkout, dan memantau pesanan.',seller:'Masuk untuk mendaftarkan toko, mengelola produk, dan memproses pesanan. Akun Seller memerlukan persetujuan Admin.',courier:'Masuk untuk mengajukan akun kurir dan mengambil pengiriman setelah disetujui Admin.',admin:'Halaman terbatas untuk pengelola KSB GO. Akun Admin tidak dapat didaftarkan secara mandiri.'};
+  KSB.authGuestView=function(){
+    if(current==='buyer'&&!KSB.state.publicBuyerLoginChosen&&!KSB.state.otpChallenge&&!KSB.state.otpExisting)return KSB.publicRoleChooser();
+    const hasChallenge=!!KSB.state.otpChallenge;
+    const inCode=hasChallenge||!!KSB.state.otpExisting;
+    const verifyEmail=hasChallenge?'':`<div class="field"><label for="otp_verify_email">Email penerima kode</label><input id="otp_verify_email" name="email" type="email" autocomplete="email" value="${KSB.h(KSB.state.otpEmail||'')}" required></div>`;
+    const codePanel=`<p>${hasChallenge?'Kode sekali pakai telah dikirim ke <b>'+KSB.h(KSB.state.otpEmail)+'</b>.':'Sudah menerima OTP sebelumnya? Masukkan email yang sama dan kode yang masih berlaku (maksimal 20 menit). Tidak perlu meminta kode baru.'}</p><form data-form="authOtpVerify">${verifyEmail}<div class="field"><label for="otp_code">Kode verifikasi 8 digit</label><input id="otp_code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{8}" minlength="8" maxlength="8" required placeholder="12345678"></div><button class="btn" type="submit">Verifikasi dan Masuk</button></form><button type="button" class="auth-v5-secondary" data-action="authResetOtp">← Kembali ke kirim kode</button>`;
+    const startPanel=`<form data-form="authOtpStart"><div class="field"><label for="auth_email">Alamat email</label><input id="auth_email" name="email" autocomplete="email" type="email" value="${KSB.h(KSB.state.otpEmail||'')}" placeholder="nama@gmail.com" required></div>${(KSB.state.config&&KSB.state.config.publicSignupEnabled&&current!=='admin')?'<div id="ksb-public-otp-captcha" role="group" aria-label="Verifikasi anti-bot"></div>':(current!=='admin'?'<div class="ksb-v8-status warning" role="status">Pendaftaran publik belum aktif. Email penguji yang sudah didaftarkan Admin masih dapat meminta kode. Untuk pendaftaran umum, lengkapi Turnstile di Script Properties.</div>':'')}<button class="btn" type="submit">Kirim Kode Masuk / Daftar</button></form><button type="button" class="auth-v5-secondary" data-action="authUseExistingOtp" style="display:block;margin:16px auto 0">Saya sudah punya kode OTP</button>`;
+    return `<section class="ksb-v8-signin"><span class="portal-mark">${PORTAL_ICONS[current]} PORTAL ${portalName.toUpperCase()}</span><h1>Masuk / Daftar ${current==='buyer'?'di KSB GO':'sebagai '+portalName}</h1><p>${authIntro[current]}</p>${inCode?codePanel:startPanel}<p class="small muted">Kode berlaku 20 menit. Jeda kirim ulang minimal 30 detik; maksimum 4 kode per jam. Maksimal 5 percobaan verifikasi. Jangan membagikan kode kepada siapa pun.</p>${current==='buyer'?'<button type="button" class="ksb-v9-back" data-action="authBackToRoles">← Pilih jenis akun lain</button>':''}</section>`;
+  };
+  KSB.authUserView=function(){
+    const u=KSB.state.user;
+    const status=(KSB.state.roleStatuses||[]).find(s=>s.role===portalRole);
+    let detail='';
+    if(allowed()) detail=`<div class="ksb-v8-status">Akses ${portalName} telah aktif. Gunakan tombol di bawah untuk masuk ke dashboard.</div><button type="button" class="btn" data-action="authOpenDashboard">${current==='buyer'?'Mulai Belanja':'Buka Dashboard '+portalName}</button>`;
+    else if(current==='admin') detail=`<div class="ksb-v8-status warning">Akun ini tidak mempunyai izin Admin. Hanya akun yang ditetapkan pengelola sistem yang boleh masuk. Hubungi pengelola KSB GO.</div>`;
+    else if(current==='buyer') detail=`<div class="ksb-v8-status warning">Akses pembeli belum tersedia pada akun ini. Hubungi pengelola.</div>`;
+    else if(status&&status.status==='PENDING') detail=`<div class="ksb-v8-status warning">Pendaftaran ${portalName} sedang menunggu persetujuan Admin. Anda belum dapat mengakses dashboard operasional.</div>`;
+    else if(status&&status.status==='REJECTED') detail=`<div class="ksb-v8-status warning">Pengajuan ${portalName} ditolak. Hubungi pengelola sebelum mendaftar kembali.</div>`;
+    else detail=`<div class="ksb-v8-status">Akun terverifikasi. Lengkapi pengajuan ${portalName} agar dapat diperiksa Admin.</div><form data-form="authPartnerApply">${KSB.field('name','Nama lengkap','text',u.name,true)}${KSB.field('phone','WhatsApp aktif','tel',u.phone||'',current==='courier')}${current==='courier'?KSB.field('vehicle','Jenis kendaraan','text','Motor',true):''}<button class="btn" type="submit">Daftar sebagai ${portalName}</button></form>`;
+    return `<section class="ksb-v8-signin"><span class="portal-mark">${PORTAL_ICONS[current]} PORTAL ${portalName.toUpperCase()}</span><h1>Halo, ${KSB.h(u.name)}</h1><p>${KSB.h(u.email)}</p>${detail}<div class="ksb-v8-panel-actions">${allowed()?'<button class="btn outline" type="button" data-action="authMyProfile">Edit Profil</button>':''}<button class="btn secondary" type="button" data-action="logout">Keluar</button></div></section>`;
+  };
+  KSB.authPage=function(){return KSB.state.user?KSB.authUserView():KSB.authGuestView();};
+  KSB.actions.authMyProfile=async()=>KSB.goto('profile');
+  // Keep role and session scoped to portal after email OTP (the backend is the source of authorization).
+  KSB.forms.authOtpStart=async form=>KSB.run(async()=>{
+    const email=form.elements.email.value.trim();
+    const mustVerify=!!(KSB.state.config&&KSB.state.config.publicSignupEnabled&&current!=='admin');
+    const captchaToken=mustVerify && window.turnstile && KSB.state.publicCaptchaWidget!==undefined ? window.turnstile.getResponse(KSB.state.publicCaptchaWidget) : '';
+    if(mustVerify&&!captchaToken)throw Error('Selesaikan verifikasi anti-bot di bawah email.');
+    let ans;
+    try{ans=await KSB.call('auth.otp.start',{email,role:portalRole,turnstileToken:captchaToken});}
+    catch(e){
+      if(mustVerify&&window.turnstile&&KSB.state.publicCaptchaWidget!==undefined)window.turnstile.reset(KSB.state.publicCaptchaWidget);
+      // No new OTP is issued on a rate-limit failure. Only offer verification of an existing, unexpired one.
+      if(/batas pengiriman kode|batas 4 kode|tunggu\s+\d+\s+detik/i.test(String(e.message||''))){
+        KSB.state.otpEmail=email;KSB.state.otpExisting=true;
+        await KSB.goto('account');
+        KSB.toast('Batas pengiriman kode tercapai. Masukkan kode terakhir jika masih berlaku (20 menit), atau tunggu.',true);
+        return;
+      }
+      throw e;
+    }
+    KSB.state.loginRole=portalRole;KSB.state.otpEmail=email;KSB.state.otpChallenge=ans.challengeId;KSB.state.otpExisting=false;
+    await KSB.goto('account');KSB.toast('Kode verifikasi telah dikirim. Periksa email dan folder Spam.');
+  });
+  KSB.forms.authOtpVerify=async form=>KSB.run(async()=>{
+    const payload={code:form.elements.code.value};
+    if(KSB.state.otpChallenge){payload.challengeId=KSB.state.otpChallenge;}
+    else{payload.email=form.elements.email.value.trim();payload.role=portalRole;}
+    const response=await KSB.call('auth.otp.verify',payload);
+    KSB.state.token=response.token;KSBStore.setItem('ksb_token',response.token);
+    KSB.state.user=response.user;KSB.state.otpChallenge='';KSB.state.otpExisting=false;KSB.state.role=portalRole;KSB.state.loginRole=portalRole;
+    await KSB.authLoadStatuses();await KSB.goto(allowed()?(current==='buyer'?'home':'dashboard'):'account');
+    KSB.toast('Anda berhasil masuk ke KSB GO.');
+  });
+  KSB.actions.logout=async()=>{
+    try{if(KSB.state.token)await KSB.call('auth.logout');}catch(e){}
+    KSB.state.token='';KSB.state.user=null;KSB.state.role=portalRole;KSB.state.publicBuyerLoginChosen=false;KSB.state.otpChallenge='';KSB.state.otpExisting=false;
+    KSBStore.removeItem('ksb_token');await KSB.goto(current==='buyer'?'home':'account');
+  };
+  // Render role-tailored toolbar; marketplace header must contain no Admin entry.
+  const buyerHeader=KSB.renderHeader;
+  KSB.renderHeader=function(){
+    if(current==='buyer'){
+      buyerHeader.call(this);
+      const h=document.getElementById('header');
+      h.querySelectorAll('.role-tab,[data-action="role"]').forEach(btn=>btn.remove());
+      return;
+    }
+    const links={seller:[['dashboard','Beranda'],['store','Toko'],['products','Produk'],['orders','Pesanan'],['finance','Keuangan'],['claims','Tagihan'],['account','Akun']],courier:[['dashboard','Beranda'],['available','Order Tersedia'],['my','Pengiriman'],['finance','Keuangan'],['claims','Tagihan'],['account','Akun']],admin:[['dashboard','Dashboard'],['pending','Verifikasi Mitra'],['orders','Pesanan'],['payments','Pembayaran'],['claims','Tagihan'],['invoices','Invoice'],['settings','Pengaturan']]};
+    const items=allowed()?links[current]:[];
+    document.getElementById('header').innerHTML=`<header class="ksb-v8-header"><div class="ksb-v8-head-inner"><div class="ksb-v8-brand"><span class="ksb-v8-monogram">K</span><span><strong>KSB GO</strong><small>${PORTAL_ICONS[current]} ${portalName} · Portal terpisah</small></span></div><div class="ksb-v8-head-controls">${allowed()?`<button class="btn outline small ksb-refresh-button" type="button" data-action="portalRefreshV152" aria-label="Perbarui data portal sekarang" title="Memuat data terbaru tanpa reload website">↻ Refresh</button>`:''}${KSB.state.user?`<button class="btn outline small" type="button" data-action="account">Akun</button><button class="btn secondary small" type="button" data-action="logout">Keluar</button>`:'<span class="pill">🔒 Akses Terbatas</span>'}</div></div>${items.length?`<nav class="ksb-v8-nav" aria-label="Navigasi ${portalName}">${items.map(x=>`<button type="button" data-action="nav" data-view="${x[0]}" class="${KSB.state.view===x[0]?'active':''}">${x[1]}</button>`).join('')}</nav>`:''}</header>`;
+  };
+  // V15.2 — Manual refresh + cautious auto refresh for operational queues.
+  // Poll only while visible and only in read-only queue views, not in checkout or edit forms.
+  const refreshViews={
+    seller:['dashboard','orders'],
+    courier:['dashboard','available','my'],
+    admin:['dashboard','pending','orders','payments']
+  };
+  let refreshing=false;
+  let lastCompleted=0;
+  async function refreshPortal(manual){
+    if(!allowed()||refreshing)return;
+    // No automatic refresh while a modal or input is being used, avoiding lost form data.
+    if(!manual){
+      if(document.visibilityState!=='visible'||!refreshViews[current]||!refreshViews[current].includes(KSB.state.view))return;
+      const busy=document.getElementById('busy');
+      const modal=document.getElementById('modal-layer');
+      if((busy&&!busy.hidden)||(modal&&!modal.hidden))return;
+      if(document.querySelector('input:focus, textarea:focus, select:focus, [contenteditable="true"]:focus'))return;
+    }
+    refreshing=true;
+    const viewAtStart=KSB.state.view;
+    const button=document.querySelector('[data-action="portalRefreshV152"]');
+    if(button){button.disabled=true;button.textContent='↻ Memuat…';}
+    try{
+      await KSB.refresh();
+      lastCompleted=Date.now();
+      if(manual&&KSB.state.view===viewAtStart)KSB.toast('Data halaman telah diperbarui.');
+    }catch(err){
+      if(manual)KSB.toast('Refresh gagal: '+(err.message||String(err)),true);
+      else console.warn('KSB GO background refresh failed:',err);
+    }finally{
+      refreshing=false;
+      const currentButton=document.querySelector('[data-action="portalRefreshV152"]');
+      if(currentButton){currentButton.disabled=false;currentButton.textContent='↻ Refresh';currentButton.title=lastCompleted?'Pembaruan: '+new Date(lastCompleted).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}):'Muat ulang data';}
+    }
+  }
+  KSB.actions.portalRefreshV152=async()=>refreshPortal(true);
+  // Every two minutes at most for a visible active queue; never high-frequency Sheets polling.
+  window.setInterval(()=>{if(!refreshing)void refreshPortal(false);},120000);
+  document.addEventListener('visibilitychange',()=>{
+    if(document.visibilityState==='visible'&&lastCompleted&&Date.now()-lastCompleted>=120000)void refreshPortal(false);
+  });
+  const priorBottom=KSB.renderBottom;
+  KSB.renderBottom=function(){
+    if(current!=='buyer'&&!allowed()){document.getElementById('bottom').innerHTML='';return;}
+    priorBottom.call(this);
+  };
+  const buyerView=KSB.buyer;
+  KSB.buyer=async function(view,args){if(view==='profile'&&allowed())return KSB.page('Profil Pembeli',`<div class="card"><form data-form="profile">${KSB.field('name','Nama lengkap','text',KSB.state.user.name,true)}${KSB.field('phone','WhatsApp','tel',KSB.state.user.phone||'')}<button class="btn" type="submit">Simpan profil</button></form></div>`);return buyerView(view,args);};
+  const views={seller:KSB.seller,courier:KSB.courier,admin:KSB.admin};
+  ['seller','courier','admin'].forEach(which=>{
+    const orig=views[which];
+    KSB[which]=async function(view,args){
+      if(view==='account'||view==='login'||!allowed())return KSB.authPage();
+      if(view==='profile')return KSB.page('Profil Saya',`<div class="card"><form data-form="profile">${KSB.field('name','Nama lengkap','text',KSB.state.user.name,true)}${KSB.field('phone','WhatsApp','tel',KSB.state.user.phone||'')}<button class="btn" type="submit">Simpan profil</button></form></div>`);
+      return typeof orig==='function'?orig(view,args):KSB.empty('Modul portal tidak terpasang','Periksa Seller.html, Courier.html, AdminView.html dalam folder deploy.');
+    };
+  });
+  // Render Cloudflare Turnstile after the async SPA screen is replaced.
+  var previousAfterRender=KSB.afterRender;
+  KSB.afterRender=async function(){
+    if(typeof previousAfterRender==='function')await previousAfterRender.call(this);
+    var node=document.getElementById('ksb-public-otp-captcha');
+    if(!node||node.dataset.ready==='1')return;
+    KSB.renderPublicCaptcha();
+  };
+  KSB.renderPublicCaptcha=function(){
+    var node=document.getElementById('ksb-public-otp-captcha');
+    if(!node||node.dataset.ready==='1')return;
+    if(!window.turnstile){
+      var tries=Number(node.dataset.retryCount||0)+1;
+      node.dataset.retryCount=String(tries);
+      node.textContent=tries<9?'Memuat pemeriksaan keamanan…':'Pemeriksaan anti-bot gagal dimuat. Periksa koneksi lalu refresh.';
+      if(tries<9)setTimeout(function(){KSB.renderPublicCaptcha();},700);
+      return;
+    }
+    KSB.state.publicCaptchaWidget=undefined;
+    node.textContent='';
+    var key=KSB.state.config&&KSB.state.config.turnstileSiteKey;
+    if(!key){node.textContent='Pendaftaran publik belum dikonfigurasi.';return;}
+    try{
+      KSB.state.publicCaptchaWidget=window.turnstile.render(node,{
+        sitekey:key,action:'ksb_public_auth',theme:'light',
+        'error-callback':function(){KSB.toast('Verifikasi anti-bot gagal dimuat.',true);}
+      });
+      node.dataset.ready='1';
+    }catch(e){node.textContent='Anti-bot tidak dapat dimuat. Muat ulang halaman.';console.error('CAPTCHA:',e.message);}
+  };
+  KSB.init=async function(){
+    this.state.role=portalRole;this.state.loginRole=portalRole;
+    try{
+      this.state.config=await this.call('config');
+      if(this.state.token){
+        try{this.state.user=await this.call('auth.me');await this.authLoadStatuses();}
+        catch(e){this.state.token='';this.state.user=null;KSBStore.removeItem('ksb_token');}
+      }
+      await this.goto(allowed()?(current==='buyer'?'home':'dashboard'):(current==='buyer'?'home':'account'));
+    }catch(e){document.getElementById('screen').innerHTML=this.empty('Konfigurasi belum selesai',e.message,'<button class="btn" data-action="retry">Coba lagi</button>');}
+  };
+})();
+</script>

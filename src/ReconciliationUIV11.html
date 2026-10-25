@@ -1,0 +1,54 @@
+<script>
+/* Admin-only page. UI controls do not replace server-side ADMIN authorization. */
+(function () {
+  if (!window.KSB) return;
+  const previous = KSB.admin;
+  KSB.admin = async function (view,args) {
+    if (view !== 'reconciliation') return previous.call(this,view,args);
+    if (!(KSB.state.user && KSB.state.user.roles && KSB.state.user.roles.includes('ADMIN'))) return KSB.accountView();
+    const [summary,mutations,audit] = await Promise.all([
+      KSB.call('admin.reconciliation.summary'),
+      KSB.call('admin.bank.mutations',{size:30}),
+      KSB.call('admin.integrity.audit')
+    ]);
+    const cash = (n) => KSB.rup(n);
+    return KSB.page('Rekonsiliasi Bank dan QRIS', `
+      ${audit.issueCount?`<div class="notice warn"><strong>Pemeriksaan integritas menemukan ${audit.issueCount} masalah.</strong> Hentikan verifikasi dan pencairan sampai ditelusuri. ${audit.issues.slice(0,6).map(x=>KSB.h(x.type+': '+x.id)).join('; ')}</div>`:''}<div class="notice warn"><strong>Mutasi dicatat manual dari sumber resmi.</strong> Unggahan bukti pembeli dan komunikasi WhatsApp bukan konfirmasi dana. Cocokkan ke dashboard bank/QRIS di luar KSB GO. Saldo buku tidak sama dengan saldo riil rekening.</div>
+      <div class="grid grid-2 stats-grid">
+        <div class="stat"><div class="title">Mutasi belum dicocokkan</div><div class="value">${summary.unmatchedMutationCount}</div></div>
+        <div class="stat"><div class="title">Kredit belum dicocokkan</div><div class="value">${cash(summary.unmatchedCredits)}</div></div>
+        <div class="stat"><div class="title">Hak Seller dicatat</div><div class="value">${cash(summary.sellerPayable)}</div></div>
+        <div class="stat"><div class="title">Hak Kurir dicatat</div><div class="value">${cash(summary.courierPayable)}</div></div>
+        <div class="stat"><div class="title">Pembayaran perlu verifikasi</div><div class="value">${summary.pendingPayments}</div></div>
+        <div class="stat"><div class="title">Tagihan belum lunas</div><div class="value">${summary.pendingPartnerClaims}</div></div>
+      </div>
+      <div class="card"><h3>Catat mutasi dari laporan resmi</h3>
+        <form data-form="bankMutationV11">
+          ${KSB.field('reference','Referensi unik mutasi','text','',true)}
+          ${KSB.field('amount','Nominal Rp','number','',true,'min="1" step="1"')}
+          ${KSB.select('direction','Arah dana',[{id:'CREDIT',name:'Masuk ke rekening KSB GO'},{id:'DEBIT',name:'Keluar dari rekening KSB GO'}])}
+          ${KSB.select('channel','Sumber',[{id:'BANK',name:'Mutasi bank'},{id:'QRIS',name:'Laporan resmi QRIS'}])}
+          ${KSB.field('bankDate','Tanggal transaksi (YYYY-MM-DD)','date','',true)}
+          ${KSB.field('description','Keterangan')}
+          <label class="flex"><input class="check" name="confirmIndependentStatement" type="checkbox" required> Saya telah mencocokkan transaksi ini dengan laporan bank/merchant QRIS resmi.</label>
+          <button class="btn full" type="submit">Catat mutasi</button>
+        </form>
+      </div>
+      <div class="card"><h3>Mutasi terbaru</h3>${mutations.list.items.map(m=>
+        `<div class="row-item"><div class="info"><b>${KSB.h(m.reference)}</b><div class="small muted">${KSB.h(m.bank_date)} · ${KSB.h(m.channel)} · ${KSB.h(m.direction)} · ${KSB.h(m.matched_entity_type)} ${KSB.h(m.matched_entity_id)}</div></div><div style="text-align:right"><b>${cash(m.amount)}</b><div class="small">${KSB.status(m.status)}</div></div></div>`
+      ).join('')||KSB.empty('Belum ada mutasi tersalin')}</div>
+      <div class="notice">Untuk memverifikasi pembayaran: catat mutasi <b>CREDIT</b>, kemudian buka Verifikasi Transfer dan masukkan referensi yang sama. Untuk menandai tagihan PAID: catat mutasi <b>DEBIT</b> terlebih dahulu.</div>
+    `);
+  };
+  KSB.actions.adminReconcile = async function(){await KSB.goto('reconciliation');};
+  KSB.forms.bankMutationV11 = async function(form){
+    const v=Object.fromEntries(new FormData(form));
+    if(!v.confirmIndependentStatement)throw Error('Pemeriksaan mutasi bank resmi wajib.');
+    await KSB.run(async()=>{
+      await KSB.call('admin.bank.record',{reference:v.reference,amount:Number(v.amount),direction:v.direction,channel:v.channel,bankDate:v.bankDate,description:v.description,confirmIndependentStatement:true});
+      KSB.toast('Mutasi tercatat. Lakukan pencocokan melalui transaksi yang terkait.');
+      await KSB.goto('reconciliation');
+    });
+  };
+})();
+</script>

@@ -1,0 +1,16 @@
+<script>
+// Runtime guard: marketplace detail is always routed through one registered action.
+if(window.KSB){
+  KSB.actions.product=async function(el){return KSB.goto('product',{id:el.dataset.id});};
+  KSB.actions.goCart=async function(){if(!KSB.needLogin())return;return KSB.goto('cart');};
+  KSB.actions.goOrders=async function(){if(!KSB.needLogin())return;return KSB.goto('orders');};
+  KSB.actions.account=async function(){return KSB.goto('account');};
+  KSB.forms.payoutReview=async function(){throw Error('Gunakan tombol Verifikasi atau Tolak untuk memproses rekening mitra.');};
+}
+/** Single delegated event system; all dynamically rendered buttons remain clickable. */
+document.addEventListener('click',async event=>{const btn=event.target.closest('[data-action]');if(!btn||btn.disabled)return;event.preventDefault();const handler=KSB.actions[btn.dataset.action];if(!handler){KSB.toast('Tindakan belum terdaftar: '+btn.dataset.action,true);return;}try{await handler(btn,event);}catch(e){KSB.toast(e.message||'Operasi gagal',true);}});
+document.addEventListener('submit',async event=>{const form=event.target.closest('form[data-form]');if(!form)return;event.preventDefault();const fn=KSB.forms[form.dataset.form];if(!fn){KSB.toast('Form belum terdaftar: '+form.dataset.form,true);return;}try{await fn(form,event);}catch(e){KSB.toast(e.message,true);}});
+document.addEventListener('change',async event=>{const el=event.target;if(el.dataset.selectItem){if(el.checked)KSB.state.selectedItems.add(el.dataset.selectItem);else KSB.state.selectedItems.delete(el.dataset.selectItem);}if(el.dataset.filter==='district'){await KSB.goto('categories',{...KSB.state.args,district:el.value});}});
+document.getElementById('modal-layer').addEventListener('click',event=>{if(event.target.id==='modal-layer')KSB.closeModal();});
+window.addEventListener('load',()=>KSB.init());
+</script>

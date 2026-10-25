@@ -1,0 +1,27 @@
+<script>
+/* KSB GO V15: admin transaction safety, refund, and transaction recovery diagnostics. */
+KSB.adminOpsV15 = async function(){
+  const [preflight,integrity,refunds,restocks] = await Promise.all([
+    KSB.call('admin.preflight.v15'),KSB.call('admin.integrity.v15'),
+    KSB.call('admin.refund.cases',{size:40}),KSB.call('admin.refund.stock',{size:40})]);
+  const summary=`<div class="grid grid-2"><div class="stat"><div class="title">Pemeriksaan operasional</div><div class="value">${preflight.checks.filter(x=>x.passed).length}/${preflight.checks.length}</div></div><div class="stat"><div class="title">Temuan memerlukan tindakan</div><div class="value">${integrity.issueCount}</div></div></div>`;
+  const checks=preflight.checks.map(x=>`<div class="row-item"><div class="info"><strong>${KSB.h(x.name)}</strong><div class="small muted">${KSB.h(x.detail)}</div></div><span class="pill">${x.passed?'✓':'Periksa'}</span></div>`).join('');
+  const issues=integrity.issues.slice(0,100).map(x=>KSB.cardRow(x.type,x.id,x.detail)).join('')||KSB.empty('Tidak ditemukan ketidaksesuaian oleh pemeriksaan otomatis.');
+  const cases=refunds.items.map(c=>`<div class="card" style="margin-bottom:12px"><b>${KSB.h(c.id)}</b><div class="small">Order ${KSB.h(c.order_id)} · ${KSB.rup(c.amount)} · ${KSB.h(c.status)}</div><p>${KSB.h(c.reason)}</p>${c.status==='REQUESTED'?`<form data-form="refundReviewV15"><input type="hidden" name="id" value="${KSB.h(c.id)}">${KSB.field('note','Hasil pemeriksaan','text','',true)}<div class="btn-group"><button class="btn" type="submit" name="approve" value="true">Setujui</button><button class="btn outline" type="submit" name="approve" value="false">Tolak</button></div></form>`:''}${['APPROVED','BANK_RECONCILING'].includes(c.status)?`<form data-form="refundConfirmV15"><input type="hidden" name="id" value="${KSB.h(c.id)}">${KSB.field('bankReference','Referensi mutasi DEBIT bank','text',c.bank_reference||'',true)}<label class="flex"><input type="checkbox" name="confirmIndependentStatement" required> Saya telah mengecek mutasi bank/QRIS resmi</label><button class="btn full">Cocokkan Dana Refund</button></form>`:''}</div>`).join('')||KSB.empty('Belum ada permohonan refund.');
+  const stock=restocks.items.filter(x=>x.status!=='DONE').map(x=>`<div class="card" style="margin-bottom:12px"><b>${KSB.h(x.id)}</b><div class="small muted">Produk ${KSB.h(x.product_id)} · ${KSB.h(x.quantity)} unit · ${KSB.h(x.status)}</div>${x.status==='PENDING'?`<form data-form="refundRestockV15"><input type="hidden" name="id" value="${KSB.h(x.id)}">${KSB.field('note','Catatan hasil pemeriksaan fisik','text','',true)}<label class="flex"><input type="checkbox" name="confirmPhysicalStock" required> Saya telah mengecek barang/stok fisik dan aman untuk dipulihkan</label><button class="btn full">Pulihkan Stok Terverifikasi</button></form>`:'<p class="notice warn">Status APPLYING. Periksa stok dan catatan pergerakan stok secara manual; jangan mengulang operasi.</p>'}</div>`).join('')||KSB.empty('Tidak ada review stok tertunda.');
+  return KSB.page('Keamanan Transaksi, Refund & Audit',`${summary}<div class="notice warn">${KSB.h(preflight.warning)} Rekap Sheets tidak menggantikan mutasi bank nyata.</div><h3 class="section-title">Checklist Peluncuran</h3><div class="card">${checks}</div><h3 class="section-title">Anomali dan Transaksi Terputus</h3><div class="card">${issues}</div><h3 class="section-title">Refund Transfer Manual</h3>${cases}<h3 class="section-title">Pemeriksaan Pemulihan Stok</h3>${stock}`);
+};
+KSB.actions.adminOpsV15=async()=>KSB.goto('operationsV15');
+KSB.forms.refundReviewV15=async(form,event)=>KSB.run(async()=>{
+ const f=Object.fromEntries(new FormData(form));const approve=event.submitter?.value==='true';
+ await KSB.call('admin.refund.review',{id:f.id,note:f.note,approve});KSB.toast('Tinjauan refund disimpan.');await KSB.refresh();
+});
+KSB.forms.refundConfirmV15=async form=>KSB.run(async()=>{
+ const f=Object.fromEntries(new FormData(form));await KSB.call('admin.refund.confirm',{id:f.id,bankReference:f.bankReference,confirmIndependentStatement:!!f.confirmIndependentStatement});
+ KSB.toast('Mutasi refund dicocokkan. Masih ada pemeriksaan stok.');await KSB.refresh();
+});
+KSB.forms.refundRestockV15=async form=>KSB.run(async()=>{
+ const f=Object.fromEntries(new FormData(form));await KSB.call('admin.refund.restock',{id:f.id,note:f.note,confirmPhysicalStock:!!f.confirmPhysicalStock});
+ KSB.toast('Pemeriksaan dan pemulihan stok tercatat.');await KSB.refresh();
+});
+</script>

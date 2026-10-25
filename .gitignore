@@ -1,0 +1,9 @@
+.clasp.json
+.clasprc.json
+node_modules/
+.env*
+credentials.json
+client_secret*.json
+coverage/
+backup/
+.DS_Store

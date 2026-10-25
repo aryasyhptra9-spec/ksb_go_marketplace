@@ -1,0 +1,87 @@
+name: KSB GO - Sinkronisasi Otomatis Apps Script
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Lingkungan tujuan (production memerlukan persetujuan environment)'
+        required: true
+        type: choice
+        options: [staging, production]
+        default: staging
+      publish_webapp:
+        description: 'Perbarui deployment /exec yang sudah ada (FALSE = push draft saja)'
+        type: boolean
+        required: true
+        default: false
+      confirmation:
+        description: 'Ketik: SYNC KSB GO (untuk mencegah salah tekan)'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: ksb-go-${{ inputs.target }}
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: ${{ inputs.confirmation == 'SYNC KSB GO' }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.target }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Audit statis wajib lulus
+        run: npm test
+      - name: Instal CLI Google Apps Script
+        run: npm install -g @google/clasp@3
+      - name: Siapkan OAuth dan kaitkan Script ID
+        env:
+          AUTH_JSON: ${{ secrets.CLASPRC_JSON }}
+          PROJECT_JSON: ${{ secrets.CLASP_JSON }}
+          EXPECTED_SCRIPT_ID: ${{ vars.SCRIPT_ID }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$AUTH_JSON" || { echo 'CLASPRC_JSON belum ada'; exit 1; }
+          test -n "$PROJECT_JSON" || { echo 'CLASP_JSON belum ada'; exit 1; }
+          test -n "$EXPECTED_SCRIPT_ID" || { echo 'SCRIPT_ID environment belum ada'; exit 1; }
+          printf '%s' "$AUTH_JSON" > "$HOME/.clasprc.json"
+          printf '%s' "$PROJECT_JSON" > .clasp.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const auth=JSON.parse(fs.readFileSync(process.env.HOME+'/.clasprc.json','utf8'));
+          const file='.clasp.json',p=JSON.parse(fs.readFileSync(file,'utf8'));
+          if(!p.scriptId || p.scriptId!==process.env.EXPECTED_SCRIPT_ID)throw Error('Script ID berbeda dengan environment tujuan');
+          p.rootDir='src';fs.writeFileSync(file,JSON.stringify(p,null,2));
+          if(!Object.keys(auth).length)throw Error('OAuth clasp kosong');
+          NODE
+      - name: Backup source project remote sebelum ditimpa
+        run: |
+          set -euo pipefail
+          mkdir -p backup
+          cp .clasp.json backup/.clasp.json
+          (cd backup && clasp pull)
+          tar -czf previous-remote-source.tgz -C backup src
+      - name: Arsip backup (unduh jika perlu rollback)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ksb-go-remote-before-${{ inputs.target }}-${{ github.run_number }}
+          path: previous-remote-source.tgz
+          retention-days: 7
+      - name: Kirim seluruh file source otomatis
+        run: clasp push --force
+      - name: Buat versi dan perbarui deployment yang sudah ada
+        if: ${{ inputs.publish_webapp }}
+        env:
+          DEPLOYMENT_ID: ${{ vars.DEPLOYMENT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOYMENT_ID" || { echo 'DEPLOYMENT_ID environment belum diatur, /exec tidak diubah'; exit 1; }
+          clasp create-deployment --deploymentId "$DEPLOYMENT_ID" --description "KSB GO ${GITHUB_SHA::8} ${GITHUB_RUN_NUMBER}"
+      - name: Jangan menyimpan OAuth dalam runner
+        if: always()
+        run: rm -f "$HOME/.clasprc.json" .clasp.json backup/.clasp.json
