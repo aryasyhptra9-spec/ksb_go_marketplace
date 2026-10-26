@@ -1,0 +1,56 @@
+<script>
+/* KSB GO: safe storage + explicit global object initialization. */
+var KSBStore = window.KSBStore || (window.KSBStore = {
+  getItem: function(key) { try { return window.sessionStorage.getItem(key); } catch (_e) { return null; } },
+  setItem: function(key, value) { try { window.sessionStorage.setItem(key, value); } catch (_e) {} },
+  removeItem: function(key) { try { window.sessionStorage.removeItem(key); } catch (_e) {} }
+});
+var KSB = window.KSB = {
+ state:{role:'BUYER',view:'home',args:{},user:null,token:KSBStore.getItem('ksb_token')||'',config:null,categories:[],selectedItems:new Set(),page:1},actions:{},forms:{},
+ h(v){return String(v===null||v===undefined?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));},
+ rup(v){return 'Rp '+new Intl.NumberFormat('id-ID',{maximumFractionDigits:0}).format(Number(v)||0);},
+ date(v){try{return new Intl.DateTimeFormat('id-ID',{dateStyle:'medium',timeZone:'Asia/Makassar'}).format(new Date(v));}catch(e){return v||'-';}},
+ requestKey(){if(typeof crypto!=='undefined'&&crypto.randomUUID)return crypto.randomUUID();if(typeof crypto!=='undefined'&&crypto.getRandomValues){let bytes=new Uint8Array(16);crypto.getRandomValues(bytes);return [...bytes].map(x=>x.toString(16).padStart(2,'0')).join('');}throw Error('Perangkat tidak menyediakan generator acak aman.');},
+ field(name,label,type='text',value='',required=false,extra=''){return `<div class="field"><label for="${this.h(name)}">${this.h(label)}</label><input id="${this.h(name)}" name="${this.h(name)}" type="${this.h(type)}" value="${this.h(value)}" ${required?'required':''} ${extra}></div>`;},
+ select(name,label,items,value='',required=true){return `<div class="field"><label for="${this.h(name)}">${this.h(label)}</label><select id="${this.h(name)}" name="${this.h(name)}" ${required?'required':''}>${items.map(x=>`<option value="${this.h(x.id)}" ${String(x.id)===String(value)?'selected':''}>${this.h(x.name)}</option>`).join('')}</select></div>`;},
+ status(v){return `<span class="pill ${/PENDING|WAIT|PROOF|CLAIMED|NEW|PARTIAL/.test(v)?'warning':/FAIL|REJECT|CANCEL|DISPUTE/.test(v)?'red':''}">${this.h(v||'-')}</span>`;},
+ empty(title,body='',button=''){return `<div class="empty"><div class="big">📦</div><strong>${this.h(title)}</strong><p>${this.h(body)}</p>${button}</div>`;},
+ page(title,inner,right=''){return `<div class="page-title"><h2>${this.h(title)}</h2>${right}</div>${inner}`;},
+ cardRow(title,subtitle='',right=''){return `<div class="row-item"><div class="info"><strong>${this.h(title)}</strong><div class="small muted">${this.h(subtitle)}</div></div>${right}</div>`;},
+ btn(label,action,id='',style='secondary'){return `<button type="button" class="btn ${style} small" data-action="${this.h(action)}" data-id="${this.h(id)}">${this.h(label)}</button>`;},
+ async call(action,args={}){return new Promise((resolve,reject)=>{if(!window.google||!google.script||!google.script.run){reject(Error('Jalankan aplikasi dari URL deployment Google Apps Script.'));return;}google.script.run.withSuccessHandler(r=>r&&r.ok?resolve(r.data):reject(Error(r?r.error:'Server tidak merespons'))).withFailureHandler(e=>reject(Error(e.message||'Koneksi server gagal'))).api(action,args,KSB.state.token);});},
+ busy(on){document.getElementById('busy').hidden=!on;},
+ toast(message,error=false){const t=document.getElementById('toast');t.textContent=message;t.className='toast'+(error?' error':'');t.hidden=false;clearTimeout(this._toastTimer);this._toastTimer=setTimeout(()=>t.hidden=true,4200);},
+ async run(fn){this.busy(true);try{await fn();}catch(e){this.toast(e.message||String(e),true);}finally{this.busy(false);}},
+ modal(title,html){document.getElementById('modal-title').textContent=title;document.getElementById('modal-body').innerHTML=html;document.getElementById('modal-layer').hidden=false;},
+ closeModal(){document.getElementById('modal-layer').hidden=true;},
+ needLogin(){if(this.state.user)return true;this.modal('Masuk ke KSB GO',`<p class="muted">Masuk melalui Akun dengan kode email untuk melakukan transaksi atau mendaftar sebagai mitra.</p><div id="google-login-slot"></div>`);this.renderGoogleButton();return false;},
+ async goto(view,args={}){this.state.view=view;this.state.args=args;this.state.page=1;this.closeModal();await this.render();window.scrollTo({top:0,behavior:'instant'});},
+ async switchRole(role){if(role!=='BUYER'&&(!this.state.user||!this.state.user.roles.includes(role))){this.toast('Peran tersebut belum disetujui.',true);return;}this.state.role=role;await this.goto(role==='BUYER'?'home':'dashboard');},
+ async refresh(){await this.render();},
+ async render(){try{const s=this.state;const viewer=s.role==='BUYER'?this.buyer:s.role==='SELLER'?this.seller:s.role==='COURIER'?this.courier:this.admin;this.renderHeader();if(typeof viewer!=='function')throw Error('Modul halaman '+s.role+' belum dimuat. Pastikan seluruh file deploy V12 disalin.');document.getElementById('screen').innerHTML=await viewer(s.view,s.args);this.renderBottom();this.renderGoogleButton();if(this.afterRender)await this.afterRender();}catch(e){document.getElementById('screen').innerHTML=this.empty('Halaman belum dapat dimuat',e.message,`<button type="button" class="btn" data-action="retry">Coba Lagi</button>`);this.toast(e.message,true);}},
+ renderHeader(){const s=this.state,user=s.user;document.getElementById('header').innerHTML=`<header class="topbar"><div><div class="logo">🛍 KSB GO <span style="font-size:11px;opacity:.72">+ KSB RUTE</span><small>Belanja, Kirim, Lebih Dekat · Sumbawa Barat</small></div></div><div class="top-actions"><div class="role-row desktop-only">${user?user.roles.filter(x=>['BUYER','SELLER','COURIER','ADMIN'].includes(x)).map(r=>`<button type="button" class="${r===s.role?'selected':''}" data-action="role" data-role="${r}">${r}</button>`).join(''):''}</div><button class="icon-btn" data-action="account" title="Akun">${user?'👤':'🔐'}</button></div></header>`;},
+ renderBottom(){let role=this.state.role;let nav=role==='BUYER'?[['home','⌂','Beranda'],['categories','▦','Kategori'],['cart','🛒','Keranjang'],['orders','▤','Pesanan'],['account','♙','Akun']]:role==='SELLER'?[['dashboard','⌂','Beranda'],['products','▣','Produk'],['orders','▤','Pesanan'],['finance','▥','Keuangan'],['account','♙','Akun']]:role==='COURIER'?[['dashboard','⌂','Beranda'],['available','📦','Ambil'],['my','🛵','Pengiriman'],['finance','▥','Keuangan'],['account','♙','Akun']]:[['dashboard','⌂','Beranda'],['pending','♙','Mitra'],['payments','▤','Transfer'],['invoices','▥','Invoice'],['settings','⚙','Pengaturan']];document.getElementById('bottom').innerHTML='<nav class="nav" aria-label="Navigasi utama">'+nav.map(n=>`<button type="button" data-action="nav" data-view="${n[0]}" class="${this.state.view===n[0]?'active':''}"><span class="nav-icon">${n[1]}</span>${n[2]}</button>`).join('')+'</nav>';},
+ renderGoogleButton(){if(this.state.user||!this.state.config||!this.state.config.clientId)return;const el=document.getElementById('google-login-slot');if(!el)return;const init=()=>{if(!window.google?.accounts?.id)return;google.accounts.id.initialize({client_id:this.state.config.clientId,callback:async response=>{await this.run(async()=>{const login=await this.call('auth.login',{idToken:response.credential});this.state.token=login.token;KSBStore.setItem('ksb_token',login.token);this.state.user=login.user;this.closeModal();await this.goto('home');this.toast('Berhasil masuk sebagai '+login.user.name);});}});google.accounts.id.renderButton(el,{theme:'outline',size:'large',shape:'pill',width:260});};if(window.google?.accounts?.id)init();else setTimeout(init,600);},
+ async upload(file,entityType,entityId){if(!file)throw Error('Pilih file terlebih dahulu');if(file.size>4*1024*1024)throw Error('Batas unggah 4 MB');const base64=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.onerror=reject;reader.readAsDataURL(file);});return this.call('files.upload',{fileName:file.name,mime:file.type,base64,entityType,entityId});},
+ download(base){const raw=atob(base.base64),bytes=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);const blob=new Blob([bytes],{type:base.mime}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=base.name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);},
+ districtOptions(){return (this.state.config?.districts||[]).map(x=>({id:x.id,name:x.name}));},
+ async init(){try{this.state.config=await this.call('config');if(this.state.token){try{this.state.user=await this.call('auth.me');}catch(e){this.state.token='';KSBStore.removeItem('ksb_token');}}await this.goto('home');}catch(e){document.getElementById('screen').innerHTML=this.empty('Konfigurasi belum selesai',e.message,'<button class="btn" data-action="retry">Coba lagi</button>');}},
+};
+/* V14 core helper: available before Marketplace, Seller, Courier, and portal extensions. */
+KSB.waLink = function(number, message) {
+  var n=String(number||'').replace(/\D/g,'');
+  if(n.slice(0,1)==='0')n='62'+n.slice(1);
+  else if(n.slice(0,1)==='8')n='62'+n;
+  if(!/^62[0-9]{8,13}$/.test(n))return '';
+  return 'https://wa.me/'+n+'?text='+encodeURIComponent(String(message||''));
+};
+KSB.buildVersion='V17.2';
+KSB.actions.retry=async()=>KSB.init();
+KSB.actions.nav=async el=>KSB.goto(el.dataset.view);
+KSB.actions.role=async el=>KSB.switchRole(el.dataset.role);
+KSB.actions.account=async()=>KSB.goto('account');
+KSB.actions.logout=async()=>{await KSB.call('auth.logout');KSB.state.token='';KSB.state.user=null;KSBStore.removeItem('ksb_token');KSB.state.role='BUYER';await KSB.goto('home');};
+KSB.actions.applyRole=async el=>{if(!KSB.needLogin())return;const role=el.dataset.role;await KSB.run(async()=>{await KSB.call('auth.apply',{role,phone:'',vehicle:''});KSB.toast('Pendaftaran '+role+' dikirim untuk persetujuan admin.');await KSB.refresh();});};
+KSB.actions.downloadInvoice=async el=>KSB.run(async()=>KSB.download(await KSB.call('files.pdf',{invoiceId:el.dataset.id})));
+</script>

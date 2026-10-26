@@ -1,0 +1,49 @@
+<script>
+/* V7: order-selected manual payout claims; WhatsApp never marks an invoice paid. */
+KSB.manualClaimsView=async function(role){
+ const [eligible,mine]=await Promise.all([KSB.call('partner.claim.eligible',{role}),KSB.call('partner.claim.mine',{role,size:40})]);
+ const sum=eligible.items.reduce((a,x)=>a+Number(x.amount),0);
+ return KSB.page('Tagihan Penghasilan '+(role==='SELLER'?'Toko':'Kurir'),`
+ <div class="notice">Hanya order yang selesai, diverifikasi pembayarannya, dan telah dikonfirmasi diterima Pembeli yang bisa ditagihkan. Komisi KSB GO sudah dipotong pada nominal bersih. Pengajuan ini belum berarti uang telah ditransfer.</div>
+ <div class="card"><h3>Order Belum Ditagihkan</h3>
+ ${eligible.items.length?`<form data-form="manualClaim"><input type="hidden" name="role" value="${KSB.h(role)}">
+ ${eligible.items.map(x=>`<label class="flex" style="padding:12px 0;border-bottom:1px solid #e5e7eb"><input type="checkbox" class="check" name="sourceIds" value="${KSB.h(x.sourceId)}"> <span><b>${KSB.h(x.orderId)}</b><br><small>${KSB.h(x.sourceId)} · ${KSB.rup(x.amount)}</small></span></label>`).join('')}
+ <p class="small muted">Total semua order layak: ${KSB.rup(sum)}. Hanya yang Anda pilih akan diajukan.</p>
+ <button class="btn full">Ajukan Tagihan Pilihan</button></form>`:KSB.empty('Belum ada order yang layak ditagihkan','Order harus telah dibayar, selesai, memiliki bukti kurir, dan dikonfirmasi diterima Pembeli.')}</div>
+ <div class="card"><h3>Riwayat Pengajuan</h3>${mine.items.length?mine.items.map(c=>`<div class="row-item"><div class="info"><b>${KSB.h(c.id)}</b><div>${KSB.rup(c.total)}</div><div class="small muted">${KSB.h(c.created_at)}</div></div><div>${c.status==='PAID'?'<span class="pill">Sudah Ditransfer</span>':KSB.status(c.status)}${KSB.btn('📄 Rekap PDF','claimDownloadPDF',c.id,'outline')}${KSB.btn('💬 Kirim Tagihan WA','claimChatAdmin',role+':'+c.id,'outline')}</div></div>`).join(''):KSB.empty('Belum ada pengajuan')}</div>
+ <p>${KSB.btn('💬 Tanya Admin soal pembayaran','claimChatAdmin',role+':','outline')}</p>
+ `);
+};
+KSB.forms.manualClaim=async form=>KSB.run(async()=>{
+ const role=form.elements.role.value,sourceIds=Array.from(form.querySelectorAll('input[name="sourceIds"]:checked')).map(x=>x.value);
+ if(!sourceIds.length)throw Error('Pilih minimal satu order');
+ const res=await KSB.call('partner.claim.create',{role,sourceIds,requestKey:crypto.randomUUID()});
+ KSB.toast('Tagihan '+res.id+' diajukan. Menunggu admin.');await KSB.goto('claims');
+});
+KSB.actions.claimChatAdmin=async el=>KSB.run(async()=>{
+ const [role,id]=el.dataset.id.split(':'),r=await KSB.call('partner.chat.admin',{role,claimId:id||''});
+ if(!r.url)throw Error('WhatsApp Admin belum diatur.');
+ KSB.modal('Chat Admin KSB GO',`<p>Klik tombol di bawah untuk membuka pesan WhatsApp berisi nomor tagihan, nominal, dan daftar order. Unduh PDF rekap dari riwayat tagihan lalu lampirkan PDF tersebut secara manual di WhatsApp. Status pembayaran tetap mengikuti verifikasi Admin dan mutasi bank.</p><a class="btn full" rel="noopener noreferrer" target="_blank" href="${KSB.h(r.url)}">Buka WhatsApp Admin</a>`);
+});
+KSB.actions.claimDownloadPDF=async el=>KSB.run(async()=>KSB.download(await KSB.call('partner.claim.pdf',{id:el.dataset.id})));
+KSB.adminClaimsView=async function(){
+ const d=await KSB.call('admin.claims',{size:40});
+ return KSB.page('Pencairan Seller & Kurir',`<div class="notice warn">Hanya tandai PAID setelah benar-benar mentransfer ke rekening terverifikasi dan memeriksa referensi mutasi bank. WhatsApp bukan bukti transfer.</div>${d.items.length?d.items.map(c=>`<div class="card" style="margin-bottom:12px"><div class="flex between"><b>${KSB.h(c.id)}</b>${c.status==='PAID'?'<span class="pill">Sudah Ditransfer</span>':KSB.status(c.status)}</div><p>${KSB.h(c.party_type)} · ${KSB.h(c.party_id)}</p><div class="price">${KSB.rup(c.total)}</div><p class="small muted">Tujuan: ${KSB.h(c.bank_name)} ${KSB.h(c.bank_number_masked)} a.n. ${KSB.h(c.bank_holder)}</p>
+ ${c.status==='PENDING'?`<div class="btn-group">${KSB.btn('Setujui','adminClaimReview',c.id+':true','')}${KSB.btn('Tolak','adminClaimReview',c.id+':false','danger')}</div>`:''}
+ ${c.status==='APPROVED'?`<form data-form="manualClaimPaid"><input type="hidden" name="id" value="${KSB.h(c.id)}">${KSB.field('bankReference',KSB.state.config?.launchMode==='INTERNAL_UAT'?'Referensi UAT-xxxxxxxx':'Referensi transfer bank','text','',true)}<label class="flex"><input type="checkbox" name="confirmBankTransfer" required> ${KSB.state.config?.launchMode==='INTERNAL_UAT'?'Saya hanya mencatat pembayaran simulasi UAT':'Saya sudah mentransfer dari rekening bisnis dan mencocokkan mutasi.'}</label><button class="btn full">Catat Pembayaran Berhasil</button></form>`:''}
+ ${KSB.btn('PDF','claimDownloadPDF',c.id,'outline')}${c.status==='PAID'?`${KSB.btn('💬 Kirim Bukti via WA','adminClaimPaidWA',c.id,'outline')}<small class="muted">Sudah Ditransfer · Referensi bank: ${KSB.h(c.bank_reference)}</small>`:''}
+ </div>`).join(''):KSB.empty('Belum ada tagihan dari mitra.')}`);
+};
+KSB.actions.adminClaimPaidWA=async el=>KSB.run(async()=>{
+ const r=await KSB.call('admin.claim.partner.chat',{claimId:el.dataset.id});
+ KSB.modal('Kirim Bukti Transfer ke Mitra',`<p>Status PAID telah dicatat melalui verifikasi mutasi. Buka WhatsApp dan <strong>lampirkan bukti transfer asli secara manual</strong>; aplikasi tidak otomatis mengunggah bukti atau mengirim pesan.</p><a class="btn full" target="_blank" rel="noopener noreferrer" href="${KSB.h(r.url)}">Buka WhatsApp Mitra</a>`);
+});
+KSB.actions.adminClaimReview=async el=>KSB.run(async()=>{
+ const [id,v]=el.dataset.id.split(':');await KSB.call('admin.claim.review',{id,approve:v==='true'});await KSB.goto('claims');
+});
+KSB.forms.manualClaimPaid=async form=>KSB.run(async()=>{
+ const f=Object.fromEntries(new FormData(form));if(!f.confirmBankTransfer)throw Error('Konfirmasi mutasi bank wajib.');
+ await KSB.call('admin.claim.paid',{id:f.id,bankReference:f.bankReference,confirmBankTransfer:true});
+ KSB.toast('Transfer tercatat berdasarkan mutasi bank.');await KSB.goto('claims');
+});
+</script>

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="id"><head><meta charset="utf-8"><meta name="theme-color" content="#087d45"><meta name="color-scheme" content="light"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"><?!= include_('Styles'); ?></head>
+<body><script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script><main id="app" class="app-shell"><div id="header"></div><div id="screen" class="screen"><div class="loading-card">Memuat KSB GO…</div></div><div id="bottom"></div><div id="ksb-build-status" style="padding:9px 15px;text-align:center;font-size:10px;color:#637c6d">KSB GO · V17.2 (mobile + modul stabil)</div></main><script>
+// Shows a useful message instead of a blank screen when bootstrap fails.
+(function () {
+  function showBootFailure() {
+    var target = document.getElementById('screen');
+    if (!target) return;
+    target.innerHTML = '<section style="max-width:700px;margin:44px auto;background:#fff;padding:28px;border-radius:18px;border:1px solid #f0d6d6;font:15px Arial,sans-serif"><h2 style="color:#a32727">KSB GO gagal memuat antarmuka</h2><p>Modul JavaScript belum berhasil dijalankan. Buka F12 &gt; Console, lalu periksa pesan merah pertama.</p></section>';
+  }
+  window.addEventListener('error', function(event) {
+    if (!window.KSB || typeof window.KSB.init !== 'function') {
+      showBootFailure();
+      console.error('KSB GO bootstrap:', event.message || 'Unknown JavaScript error');
+    }
+  });
+  window.addEventListener('DOMContentLoaded', function() {
+    if (!window.KSB || typeof window.KSB.init !== 'function') showBootFailure();
+  });
+})();
+</script><?!= include_('Components'); ?>
+<script>window.KSB_PORTAL = <?!= portalJson ?>; window.KSB_APP_URL = <?!= webAppUrlJson ?>;</script><?!= include_('App'); ?><?!= include_('Buyer'); ?><?!= include_('Seller'); ?><?!= include_('AdminView'); ?><?!= include_('MapsView'); ?><?!= include_('MarketplaceUIV4'); ?><?!= include_('Courier'); ?><?!= include_('AuthUIV5'); ?><?!= include_('ManualClaimsUIV7'); ?><?!= include_('PortalV8'); ?><?!= (portal === 'admin' ? include_('ReconciliationUIV11') : ''); ?><?!= (portal === 'admin' ? include_('OperationsUIV15') : ''); ?><?!= (catalogOnly ? include_('PublicLaunchUI') : include_('CommerceV10UI')); ?><script>
+// Health signal for the complete release. This never simulates a courier or a payment.
+window.KSB_BUILD='17.2';
+window.KSB_COURIER_MODULE_OK=Boolean(window.KSB && KSB.actions &&
+  typeof KSB.actions.courierClaim==='function' && typeof KSB.courier==='function');
+window.KSB_COURIER_MODULE_VERSION=window.KSB_COURIER_MODULE_OK?'17.2':'NOT_LOADED';
+if(!window.KSB_COURIER_MODULE_OK){
+ console.error('KSB GO: Courier.html belum terdaftar. Periksa file Courier.html dan deployment yang aktif.');
+}
+</script><?!= include_('Scripts'); ?>
+</body></html>

@@ -1,0 +1,19 @@
+<style>
+.ksb-v10-notice{max-width:1320px;margin:12px auto;background:#fff2d8;color:#704800;border:1px solid #f7dba2;border-radius:12px;padding:12px 16px;font:600 13px/1.6 Inter,Arial,sans-serif}
+</style>
+<script>
+(function(){
+  if(!window.KSB)return;
+  ['buyer','seller','courier','admin'].forEach(function(role){
+    if(typeof KSB[role]!=='function')return;
+    const original=KSB[role];
+    KSB[role]=async function(view,args){
+      const html=await original.call(this,view,args);
+      if(KSB.state.config && KSB.state.config.launchMode==='INTERNAL_UAT') {
+        return '<div class="ksb-v10-notice" role="status"><strong>MODE UJI INTERNAL KSB GO — JANGAN TRANSFER UANG SUNGGUHAN.</strong> Seluruh pembayaran, mutasi, dan pencairan yang dicatat adalah simulasi pada database uji. Jangan bagikan link kepada masyarakat.</div>'+html;
+      }
+      return html;
+    };
+  });
+})();
+</script>

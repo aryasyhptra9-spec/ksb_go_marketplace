@@ -1,0 +1,223 @@
+
+name: KSB GO - Sinkronisasi Otomatis Apps Script
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Lingkungan tujuan"
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+        default: staging
+      publish_webapp:
+        description: "Perbarui deployment Web App"
+        required: true
+        type: boolean
+        default: false
+      confirmation:
+        description: "Ketik SYNC KSB GO"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ksb-go-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ inputs.confirmation == 'SYNC KSB GO' }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.target }}
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Audit statis wajib lulus
+        run: npm test
+
+      - name: Instal CLI Google Apps Script
+        run: npm install -g @google/clasp@3
+
+      - name: Validasi OAuth dan konfigurasi
+        env:
+          AUTH_JSON: ${{ secrets.CLASPRC_JSON }}
+          PROJECT_JSON: ${{ secrets.CLASP_JSON }}
+          EXPECTED_SCRIPT_ID: ${{ vars.SCRIPT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+
+          if [ -z "$AUTH_JSON" ]; then
+            echo "::error::CLASPRC_JSON belum tersedia"
+            exit 1
+          fi
+
+          if [ -z "$PROJECT_JSON" ]; then
+            echo "::error::CLASP_JSON belum tersedia"
+            exit 1
+          fi
+
+          if [ -z "$EXPECTED_SCRIPT_ID" ]; then
+            echo "::error::SCRIPT_ID belum tersedia"
+            exit 1
+          fi
+
+          printf '%s' "$AUTH_JSON" > "$HOME/.clasprc.json"
+          printf '%s' "$PROJECT_JSON" > .clasp.json
+
+          node <<'NODE'
+          const fs = require('fs');
+
+          function readJSON(path, name) {
+            let obj;
+
+            try {
+              obj = JSON.parse(fs.readFileSync(path, 'utf8'));
+            } catch (error) {
+              console.error(
+                `::error::${name} bukan JSON valid. ` +
+                `Salin isi file JSON asli, bukan perintah Termux.`
+              );
+              process.exit(1);
+            }
+
+            if (
+              !obj ||
+              typeof obj !== 'object' ||
+              Array.isArray(obj) ||
+              Object.keys(obj).length === 0
+            ) {
+              console.error(`::error::${name} kosong atau salah format`);
+              process.exit(1);
+            }
+
+            return obj;
+          }
+
+          const auth = readJSON(
+            process.env.HOME + '/.clasprc.json',
+            'CLASPRC_JSON'
+          );
+
+          const project = readJSON(
+            '.clasp.json',
+            'CLASP_JSON'
+          );
+
+          const expected = process.env.EXPECTED_SCRIPT_ID;
+
+          if (!project.scriptId) {
+            console.error('::error::scriptId tidak ditemukan');
+            process.exit(1);
+          }
+
+          if (project.scriptId !== expected) {
+            console.error('::error::Script ID tidak cocok');
+            process.exit(1);
+          }
+
+          if (
+            !auth.tokens &&
+            !auth.token &&
+            !auth.refresh_token
+          ) {
+            console.error(
+              '::error::Struktur OAuth clasp tidak dikenali'
+            );
+            process.exit(1);
+          }
+
+          project.rootDir = 'src';
+
+          fs.writeFileSync(
+            '.clasp.json',
+            JSON.stringify(project, null, 2),
+            { mode: 0o600 }
+          );
+
+          console.log('JSON valid');
+          console.log('Script ID cocok');
+          console.log('Konfigurasi siap');
+          NODE
+
+      - name: Periksa koneksi Google Apps Script
+        run: clasp status
+
+      - name: Backup source remote
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p backup
+          cp .clasp.json backup/.clasp.json
+
+          (
+            cd backup
+            clasp pull
+          )
+
+          tar -czf previous-remote-source.tgz \
+            -C backup .
+
+      - name: Simpan backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: ksb-go-backup-${{ inputs.target }}-${{ github.run_number }}
+          path: previous-remote-source.tgz
+          retention-days: 7
+
+      - name: Sinkronisasi source KSB GO
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -d src || {
+            echo "::error::Folder src tidak ditemukan"
+            exit 1
+          }
+
+          clasp push --force
+
+          echo "Sinkronisasi source selesai"
+
+      - name: Perbarui deployment Web App
+        if: ${{ inputs.publish_webapp }}
+        env:
+          DEPLOYMENT_ID: ${{ vars.DEPLOYMENT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "$DEPLOYMENT_ID" ]; then
+            echo "::error::DEPLOYMENT_ID belum diatur"
+            exit 1
+          fi
+
+          clasp create-deployment \
+            --deploymentId "$DEPLOYMENT_ID" \
+            --description "KSB GO ${GITHUB_SHA::8}"
+
+          echo "Deployment berhasil diperbarui"
+
+      - name: Hapus kredensial sementara
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$HOME/.clasprc.json"
+          rm -f .clasp.json
+          rm -rf backup
+          echo "Kredensial sementara dibersihkan"

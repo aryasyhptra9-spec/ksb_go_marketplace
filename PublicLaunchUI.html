@@ -1,0 +1,68 @@
+<style>
+.ksb-public-notice{max-width:1280px;margin:15px auto;padding:13px 18px;background:#edf8f2;border:1px solid #cbe8d6;border-radius:14px;color:#125238;font:500 13px/1.55 Inter,Arial,sans-serif}
+.ksb-public-notice strong{font-weight:800}
+.ksb-public-chat-cta{width:100%;display:block;text-align:center;border-radius:10px;background:#078848;color:#fff!important;padding:12px 10px;text-decoration:none;font-weight:700;margin-top:15px;min-height:44px;box-sizing:border-box}
+.ksb-public-detail-cta{display:block;border-radius:10px;padding:12px 10px;text-align:center;background:#effaf3;color:#087340;font-weight:750;cursor:pointer;border:1px solid #bbe4ca;min-height:44px;width:100%}
+.ksb-public-card-actions{padding:0 11px 13px}
+</style>
+<script>
+/* Public catalog overlay, included AFTER MarketplaceUIV4 and PortalV8.
+   Existing purchase handlers are prevented below AND by server API denylist. */
+(function(){
+  'use strict';
+  if (!window.KSB || window.KSB_PORTAL !== 'buyer') return;
+  // Never show design-only sample products as real offers.
+  KSB.marketDemo=function(){return KSB.empty('Produk belum tersedia','Toko yang sudah terverifikasi akan segera menampilkan produk asli.');};
+  var originalMarketHome=KSB.marketHome;
+  KSB.marketHome=async function(view,args){
+    var html=await originalMarketHome(view,args);
+    return html
+      .replace('<div><span>🔐</span><strong>Pembayaran Aman</strong><small>Konfirmasi dari sistem</small></div>', '<div><span>📞</span><strong>Kontak Langsung</strong><small>Transaksi bersama toko</small></div>')
+      .replace('<div><span>🚚</span><strong>KSB RUTE</strong><small>Antar antarwilayah</small></div>', '<div><span>🛍️</span><strong>Produk Lokal</strong><small>Dari UMKM Sumbawa Barat</small></div>')
+      .replace(/<section class="market-rute-banner">[\s\S]*?<\/section>/,'');
+  };
+  var originalProductCard=KSB.productCard;
+  KSB.productCard=function(product){
+    var html=originalProductCard(product);
+    return html.replace(/<div class="ksb-v9-card-actions">[\s\S]*?<\/div>/,
+      '<div class="ksb-public-card-actions"><button type="button" class="ksb-public-detail-cta" data-action="product" data-id="'+KSB.h(product.id)+'">Lihat Detail &amp; Hubungi Toko</button></div>');
+  };
+  var originalMarketProduct=KSB.marketProduct;
+  KSB.marketProduct=async function(args){
+    var html=await originalMarketProduct(args);
+    return html.replace(/<div class="market-buy-actions">[\s\S]*?<\/div>/,
+      '<div class="ksb-public-notice"><strong>Pemesanan langsung ke toko.</strong> Gunakan tombol Chat WhatsApp Seller di atas untuk menanyakan stok, pembayaran, dan pengantaran. KSB GO belum menerima pembayaran melalui website.</div>')
+      .replace('<small class="muted">Ongkir final dihitung saat checkout sesuai rute/zona admin.</small>','<small class="muted">Pengiriman dibicarakan dengan toko melalui WhatsApp.</small>');
+  };
+  var originalHero=KSB.marketHero;
+  KSB.marketHero=function(){return originalHero().replace(/<button data-action="goParcel"[^>]*>[\s\S]*?<\/button>/,'');};
+  var origHeader=KSB.renderHeader;
+  KSB.renderHeader=function(){
+    origHeader.call(this);
+    var header=document.getElementById('header');
+    if(!header)return;
+    header.querySelectorAll('[data-action="goCart"],[data-action="marketFavoritesPage"],[data-action="goParcel"],.market-desktop-nav button[data-view="orders"]').forEach(function(el){el.remove();});
+  };
+  KSB.renderBottom=function(){
+    var bottom=document.getElementById('bottom');
+    if(!bottom)return;
+    bottom.innerHTML='<nav class="nav market-bottom" aria-label="Navigasi katalog"><button type="button" data-action="goHome"><span class="nav-icon">⌂</span><span>Beranda</span></button><button type="button" data-action="nav" data-view="categories"><span class="nav-icon">▦</span><span>Katalog</span></button><button type="button" data-action="account"><span class="nav-icon">♙</span><span>Akun</span></button></nav>';
+  };
+  var buyer=KSB.buyer;
+  KSB.buyer=async function(view,args){
+    var permitted=['home','categories','store','product','account','login','profile'];
+    if(permitted.indexOf(view)<0)return KSB.page('Katalog KSB GO','<div class="ksb-public-notice">KSB GO saat ini menyediakan informasi produk dan kontak WhatsApp toko. Keranjang, checkout, serta jasa kurir belum tersedia melalui website. Pendaftaran akun tetap tersedia melalui tombol Akun.</div><button class="btn" type="button" data-action="goHome">Lihat Produk</button>');
+    var content=await buyer.call(this,view,args);
+    if(view==='home'||view==='categories') content='<div class="ksb-public-notice"><strong>Selamat datang di KSB GO!</strong> Temukan produk UMKM Sumbawa Barat dan hubungi penjual langsung melalui WhatsApp. Pembayaran dan pengantaran disepakati langsung dengan toko.</div>'+content;
+    return content;
+  };
+  KSB.actions.marketCardCart=async function(el){return KSB.goto('product',{id:el.dataset.id});};
+  KSB.actions.marketCardBuy=async function(el){return KSB.goto('product',{id:el.dataset.id});};
+  KSB.actions.addCart=async function(el){return KSB.goto('product',{id:el.dataset.id});};
+  KSB.actions.buyNow=async function(el){return KSB.goto('product',{id:el.dataset.id});};
+  KSB.actions.goParcel=async function(){KSB.toast('Layanan pengiriman melalui website belum diaktifkan. Hubungi toko untuk pengiriman.',true);};
+  KSB.actions.goCart=async function(){KSB.toast('Keranjang belum tersedia. Anda tetap dapat daftar/login.',true);};
+  KSB.actions.marketFavoritesPage=KSB.actions.goCart;
+  KSB.needLogin=function(){this.toast('Checkout belum tersedia. Silakan chat toko dari detail produk.',true);return false;};
+})();
+</script>
